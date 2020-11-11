@@ -1,7 +1,143 @@
-import Head from 'next/head'
-import styles from '../styles/Home.module.css'
+import Head from "next/head";
+import { useEffect, useState } from "react";
+import styles from "../styles/Home.module.css";
+import { parseCookies, setCookie, destroyCookie } from "nookies";
+import router from "next/router";
 
-export default function Home() {
+export default function Home({ spotify, playerName }) {
+  let spotifyPlayer = null;
+
+  useEffect(() => {
+    console.log(spotify);
+    if (!spotify) return router.push("/api/spotify");
+    window.onSpotifyWebPlaybackSDKReady = () => {
+      const token = spotify;
+      const player = new Spotify.Player({
+        name: playerName,
+        getOAuthToken: (cb) => {
+          cb(token);
+        },
+      });
+
+      // Error handling
+      player.addListener("initialization_error", ({ message }) => {
+        console.error(message);
+      });
+      player.addListener("authentication_error", ({ message }) => {
+        console.error(message);
+        if (message) console.log("error?");
+      });
+      player.addListener("account_error", ({ message }) => {
+        console.error(message);
+      });
+      player.addListener("playback_error", ({ message }) => {
+        console.error(message);
+      });
+
+      // Playback status updates
+      player.addListener("player_state_changed", (state) => {
+        console.log(state);
+      });
+
+      // Ready
+      player.addListener("ready", ({ device_id }) => {
+        console.log("Ready with Device ID", device_id);
+      });
+
+      // Not Ready
+      player.addListener("not_ready", ({ device_id }) => {
+        console.log("Device ID has gone offline", device_id);
+      });
+
+      // Connect to the player!
+      player.connect();
+
+      spotifyPlayer = player;
+    };
+  }, []);
+
+  const play = async ({
+    spotify_uri,
+    playerInstance: {
+      _options: { id },
+    },
+  }) => {
+    await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ uris: [spotify_uri] }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${spotify}`,
+      },
+    }).then((e) => {
+      console.log(e.data);
+    });
+  };
+
+  const playSomething = (uri) => {
+    play({
+      playerInstance: spotifyPlayer || new Spotify.Player({ name: playerName }),
+      spotify_uri: uri,
+    });
+  };
+
+  const showArtistAlbums = async (artistId) => {
+    const artistsData = await fetch(
+      `https://api.spotify.com/v1/artists/${artistId}/albums`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${spotify}`,
+        },
+      }
+    )
+      .catch(({ error }) => {
+        if (error?.status === 401) {
+          alert("not logged in");
+        }
+        console.log(err?.error);
+      })
+      .then((e) => e.json());
+    console.log(artistsData);
+  };
+  const [searchText, setSearchText] = useState("");
+  const [artists, setArtists] = useState([]);
+  const [tracks, setTracks] = useState([]);
+  const [albums, setAlbums] = useState([]);
+  const getSearchInfo = async (value) => {
+    setSearchText(value || "");
+    await fetch(
+      `https://api.spotify.com/v1/search?q=${value}&type=track%2Cartist&market=US&limit=10`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${spotify}`,
+        },
+      }
+    )
+      .catch(({ error }) => {
+        if (error?.status === 401) {
+          alert("not logged in");
+        }
+        console.log(err?.error);
+      })
+      .then((e) => e.json())
+      .then((e) => {
+        console.log(e);
+        if (e?.error?.status === 401) {
+          console.log("not logged in!");
+          return router.push("/api/spotify");
+        }
+        if (e?.error?.status === 500) {
+          console.log(e.error);
+          return;
+        }
+        setArtists(e?.artists?.items || []);
+        setTracks(e?.tracks?.items || []);
+      });
+  };
   return (
     <div className={styles.container}>
       <Head>
@@ -10,56 +146,91 @@ export default function Home() {
       </Head>
 
       <main className={styles.main}>
-        <h1 className={styles.title}>
-          Welcome to <a href="https://nextjs.org">Next.js!</a>
-        </h1>
+        <h1 className={styles.title}>Spotify Test</h1>
 
-        <p className={styles.description}>
-          Get started by editing{' '}
-          <code className={styles.code}>pages/index.js</code>
-        </p>
+        <img id="current-track" />
+        <h3 id="current-track-name"></h3>
 
-        <div className={styles.grid}>
-          <a href="https://nextjs.org/docs" className={styles.card}>
-            <h3>Documentation &rarr;</h3>
-            <p>Find in-depth information about Next.js features and API.</p>
-          </a>
+        <div className={styles.description}>
+          <p>Search Songs</p>
+          <input
+            className={styles.search}
+            label="Search Songs"
+            value={searchText}
+            onChange={(e) => getSearchInfo(e.target.value)}
+          />
+        </div>
+        <div className={styles.description}>
+          {tracks?.length ? (
+            <>
+              <h2 style={{ marginBottom: 0 }}>Artists</h2>
+              <div className={styles.grid}>
+                {artists.map((artist) => (
+                  <div
+                    onClick={() => showArtistAlbums(artist.id)}
+                    className={styles.card}
+                  >
+                    <img
+                      src={artist?.images[0]?.url}
+                      width={175}
+                      height={175}
+                      style={{ borderRadius: "50%" }}
+                    />
 
-          <a href="https://nextjs.org/learn" className={styles.card}>
-            <h3>Learn &rarr;</h3>
-            <p>Learn about Next.js in an interactive course with quizzes!</p>
-          </a>
+                    <p style={{ width: 175 }}>{artist?.name}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
 
-          <a
-            href="https://github.com/vercel/next.js/tree/master/examples"
-            className={styles.card}
-          >
-            <h3>Examples &rarr;</h3>
-            <p>Discover and deploy boilerplate example Next.js projects.</p>
-          </a>
+          {tracks?.length ? (
+            <>
+              <h2 style={{ marginBottom: 0 }}>Songs</h2>
 
-          <a
-            href="https://vercel.com/import?filter=next.js&utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className={styles.card}
-          >
-            <h3>Deploy &rarr;</h3>
-            <p>
-              Instantly deploy your Next.js site to a public URL with Vercel.
-            </p>
-          </a>
+              <div className={styles.grid}>
+                {tracks.map((track) => (
+                  <div
+                    onClick={() => playSomething(track.uri)}
+                    className={styles.card}
+                  >
+                    <img
+                      src={track?.album?.images[0]?.url}
+                      width={175}
+                      height={175}
+                    />
+                    <p className={styles.track} style={{ width: 175 }}>
+                      {track?.name}
+                    </p>
+                    <p className={styles.artist}>{track?.artists[0]?.name}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
       </main>
 
       <footer className={styles.footer}>
         <a
-          href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
+          href="https://www.linkedin.com/in/ntarasiuk"
           target="_blank"
           rel="noopener noreferrer"
         >
-          Powered by{' '}
-          <img src="/vercel.svg" alt="Vercel Logo" className={styles.logo} />
+          Powered by Nate Tarasiuk
         </a>
       </footer>
     </div>
-  )
+  );
+}
+export async function getServerSideProps(ctx) {
+  // get cookies
+  const cookies = parseCookies(ctx);
+
+  // get player name from ENV Variables
+  const spotifyPlayerName = process.env.PLAYER_NAME;
+
+  return {
+    props: { spotify: cookies && cookies.spotify || null, playerName: spotifyPlayerName },
+  };
 }
